@@ -182,4 +182,76 @@
     )
 )
 
+;; ===================================
+;; COMPREHENSIVE FRAUD DETECTION FUNCTION
+;; ===================================
+
+;; Main fraud detection function that performs comprehensive checks
+;; This function analyzes multiple fraud indicators and returns a detailed assessment
+(define-public (analyze-fraud-risk (user principal) (token-a principal) (token-b principal) 
+                                  (trade-volume uint) (trade-price uint))
+    (let (
+        ;; Get current user activity
+        (user-activity (get-user-block-activity user))
+        
+        ;; Get historical price data
+        (prev-price-data (map-get? price-history 
+            { token-a: token-a, token-b: token-b, block-height: (- block-height u1) }))
+        
+        ;; Get wash trading score
+        (wash-score (default-to { score: u0, last-updated: u0, suspicious-pairs: u0 } 
+                               (map-get? wash-trading-scores user)))
+        
+        ;; Calculate risk factors
+        (rate-limit-risk (if (> (get tx-count user-activity) MAX-TXS-PER-BLOCK) u30 u0))
+        (volume-risk (if (> trade-volume LARGE-TX-THRESHOLD) u20 u0))
+        (wash-trading-risk (get score wash-score))
+        
+        ;; Price manipulation check
+        (price-manipulation-risk 
+            (match prev-price-data
+                prev-data 
+                (let ((price-change (calculate-percentage-change (get price prev-data) trade-price)))
+                    (if (and (> price-change MAX-PRICE-DEVIATION)
+                            (> trade-volume MIN-VOLUME-THRESHOLD))
+                        u40 
+                        u0))
+                u0))
+        
+        ;; Frequency analysis risk
+        (frequency-risk 
+            (if (and (> (get tx-count user-activity) u5)
+                    (< (get total-volume user-activity) (* trade-volume u2)))
+                u25 
+                u0))
+        
+        ;; Calculate total risk score
+        (total-risk (+ rate-limit-risk volume-risk wash-trading-risk 
+                      price-manipulation-risk frequency-risk))
+        
+        ;; Determine risk level
+        (risk-level 
+            (if (> total-risk u80) "HIGH"
+            (if (> total-risk u50) "MEDIUM"
+            (if (> total-risk u25) "LOW" "MINIMAL"))))
+    )
+    
+    ;; Return comprehensive fraud analysis
+    (ok {
+        risk-score: total-risk,
+        risk-level: risk-level,
+        rate-limit-exceeded: (> (get tx-count user-activity) MAX-TXS-PER-BLOCK),
+        large-transaction: (> trade-volume LARGE-TX-THRESHOLD),
+        price-manipulation-detected: (> price-manipulation-risk u0),
+        wash-trading-score: (get score wash-score),
+        suspicious-frequency: (> frequency-risk u0),
+        recommendation: (if (> total-risk u75) 
+                           "BLOCK_TRANSACTION" 
+                       (if (> total-risk u50) 
+                           "REQUIRE_ADDITIONAL_VERIFICATION" 
+                           "ALLOW_TRANSACTION"))
+    })
+    )
+)
+
 
